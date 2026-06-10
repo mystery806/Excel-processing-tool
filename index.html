@@ -189,6 +189,7 @@
         <div class="status" id="status"></div>
 
         <button class="btn" id="processBtn" disabled title="源文件需包含前两列数据，新内容将生成到第三列和第四列">生成盘号</button>
+        <button class="btn" id="dedupeBtn" disabled>去重</button>
         <button class="btn btn-download" id="downloadBtn">下载处理后的 Excel</button>
     </div>
 
@@ -198,6 +199,7 @@
         const fileInfo = document.getElementById('fileInfo');
         const fileNameEl = document.getElementById('fileName');
         const processBtn = document.getElementById('processBtn');
+        const dedupeBtn = document.getElementById('dedupeBtn');
         const downloadBtn = document.getElementById('downloadBtn');
         const statusEl = document.getElementById('status');
 
@@ -226,6 +228,7 @@
             fileNameEl.textContent = file.name;
             fileInfo.classList.add('show');
             processBtn.disabled = false;
+            dedupeBtn.disabled = false;
             downloadBtn.classList.remove('show');
             processedWorkbook = null;
             hideStatus();
@@ -316,6 +319,63 @@
             reader.onerror = () => {
                 showStatus('文件读取失败', 'error');
                 processBtn.disabled = false;
+            };
+
+            reader.readAsArrayBuffer(currentFile);
+        });
+
+        dedupeBtn.addEventListener('click', () => {
+            if (!currentFile) return;
+
+            showStatus('正在处理文件...', 'info');
+            dedupeBtn.disabled = true;
+
+            const reader = new FileReader();
+
+            reader.onload = (e) => {
+                try {
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, { type: 'array' });
+                    const firstSheetName = workbook.SheetNames[0];
+                    const worksheet = workbook.Sheets[firstSheetName];
+
+                    const range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1:A1');
+                    const col1Letter = XLSX.utils.encode_col(0);
+
+                    const values = [];
+                    for (let row = range.s.r; row <= range.e.r; row++) {
+                        const cellAddress = col1Letter + (row + 1);
+                        const cell = worksheet[cellAddress];
+                        if (cell && cell.v !== undefined && cell.v !== null && String(cell.v).trim() !== '') {
+                            values.push(String(cell.v));
+                        }
+                    }
+
+                    const uniqueValues = [...new Set(values)];
+                    for (let i = 0; i < uniqueValues.length; i++) {
+                        const col1Address = col1Letter + (i + 1);
+                        worksheet[col1Address] = { t: 's', v: uniqueValues[i] };
+                    }
+
+                    const newRange = {
+                        s: { c: 0, r: 0 },
+                        e: { c: 0, r: Math.max(uniqueValues.length - 1, 0) }
+                    };
+                    worksheet['!ref'] = XLSX.utils.encode_range(newRange);
+
+                    processedWorkbook = workbook;
+                    showStatus(`去重完成！去重前 ${values.length} 条，去重后 ${uniqueValues.length} 条`, 'success');
+                    downloadBtn.classList.add('show');
+                } catch (err) {
+                    showStatus('处理失败：' + err.message, 'error');
+                } finally {
+                    dedupeBtn.disabled = false;
+                }
+            };
+
+            reader.onerror = () => {
+                showStatus('文件读取失败', 'error');
+                dedupeBtn.disabled = false;
             };
 
             reader.readAsArrayBuffer(currentFile);
